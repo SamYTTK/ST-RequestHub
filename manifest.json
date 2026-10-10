@@ -1,0 +1,14 @@
+{
+    "display_name": "ST Request Hub",
+    "loading_order": 5,
+    "requires": [],
+    "optional": [],
+    "dependencies": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "LayeredAgents",
+    "version": "1.5.0",
+    "homePage": "",
+    "auto_update": false,
+    "minimum_client_version": "1.12.0"
+}

@@ -1,0 +1,95 @@
+<div class="strh-console">
+    <div class="strh-con-head">
+        <div class="strh-con-head-left">
+            <div class="strh-con-kicker">ST · REQUEST HUB</div>
+            <div class="strh-con-title">HUB CONSOLE</div>
+        </div>
+        <div class="strh-con-head-right">
+            <span class="strh-con-status"><span class="strh-dot strh-dot--on"></span><span id="strh-con-status-text">OPERATIONAL</span></span>
+            <span id="strh-con-version" class="strh-con-version"></span>
+        </div>
+    </div>
+    <div class="strh-con-tabs" role="tablist">
+        <button class="strh-con-tab is-active" data-strh-tab="overview" role="tab">01 · OVERVIEW</button>
+        <button class="strh-con-tab" data-strh-tab="profiles" role="tab">02 · PROFILES</button>
+        <button class="strh-con-tab" data-strh-tab="settings" role="tab">03 · SETTINGS</button>
+    </div>
+    <div class="strh-con-views">
+        <section class="strh-con-view is-active" data-strh-view="overview" role="tabpanel">
+            <div class="strh-grid">
+                <div class="strh-card">
+                    <div class="strh-card-kicker">01 · HUB STATUS</div>
+                    <div id="strh-ov-status" class="strh-card-body"></div>
+                </div>
+                <div class="strh-card">
+                    <div class="strh-card-kicker">02 · TRAFFIC</div>
+                    <div id="strh-ov-traffic" class="strh-card-body"></div>
+                </div>
+                <div class="strh-card">
+                    <div class="strh-card-kicker">03 · LATENCY</div>
+                    <div id="strh-ov-latency" class="strh-card-body"></div>
+                </div>
+                <div class="strh-card">
+                    <div class="strh-card-kicker">04 · BY MODE</div>
+                    <div id="strh-ov-modes" class="strh-card-body"></div>
+                </div>
+                <div class="strh-card">
+                    <div class="strh-card-kicker">05 · BY CONSUMER</div>
+                    <div id="strh-ov-consumers" class="strh-card-body"></div>
+                </div>
+                <div class="strh-card">
+                    <div class="strh-card-kicker">06 · BY PROFILE</div>
+                    <div id="strh-ov-profiles" class="strh-card-body"></div>
+                </div>
+            </div>
+            <div class="strh-card strh-card--wide">
+                <div class="strh-card-kicker">07 · RECENT REQUESTS <span class="strh-dim">(SESSION · NEWEST FIRST)</span></div>
+                <div id="strh-ov-recent" class="strh-card-body"></div>
+                <div class="strh-row-end">
+                    <button id="strh-ov-clear" class="strh-btn strh-btn--danger">CLEAR STATS</button>
+                </div>
+            </div>
+        </section>
+        <section class="strh-con-view" data-strh-view="profiles" role="tabpanel">
+            <div class="strh-card strh-card--wide">
+                <div class="strh-card-kicker">API PROFILES <span class="strh-dim">(SECRETS NEVER LEAVE THE HUB)</span></div>
+                <div id="strh-pf-list"></div>
+                <div class="strh-pf-add">
+                    <input id="strh-pf-name" placeholder="Profile name" autocomplete="off">
+                    <input id="strh-pf-url" placeholder="Base URL (empty = ST backend)" autocomplete="off">
+                    <input id="strh-pf-key" type="password" placeholder="API key" autocomplete="new-password">
+                    <input id="strh-pf-model" placeholder="Default model" autocomplete="off">
+                    <button id="strh-pf-add" class="strh-btn">ADD PROFILE</button>
+                </div>
+            </div>
+            <div class="strh-card strh-card--wide">
+                <div class="strh-card-kicker">DEFAULT PROFILE <span class="strh-dim">(USED WHEN A REQUEST SENDS NO CONNECTION)</span></div>
+                <div class="strh-row">
+                    <select id="strh-pf-default"></select>
+                </div>
+            </div>
+            <div id="strh-pf-status" class="strh-statusline"></div>
+        </section>
+        <section class="strh-con-view" data-strh-view="settings" role="tabpanel">
+            <div class="strh-grid">
+                <div class="strh-card">
+                    <div class="strh-card-kicker">DEFAULTS</div>
+                    <label class="strh-field"><span>Timeout ms (0 = off)</span><input type="number" id="strh-set-timeout" min="0" step="1000"></label>
+                    <label class="strh-field"><span>Retries (network / 429 / 5xx)</span><input type="number" id="strh-set-retries" min="0" max="5"></label>
+                    <label class="strh-check"><input type="checkbox" id="strh-set-proxy"><span>Prefer CORS proxy for local endpoints</span></label>
+                </div>
+                <div class="strh-card">
+                    <div class="strh-card-kicker">AGENT MODE</div>
+                    <label class="strh-field"><span>Default max steps</span><input type="number" id="strh-set-maxsteps" min="1" max="100"></label>
+                    <label class="strh-field"><span>Max steps cap</span><input type="number" id="strh-set-maxsteps-cap" min="1" max="100"></label>
+                    <label class="strh-field"><span>Total timeout ms (0 = off)</span><input type="number" id="strh-set-total-timeout" min="0" step="1000"></label>
+                </div>
+                <div class="strh-card">
+                    <div class="strh-card-kicker">DIAGNOSTICS</div>
+                    <button id="strh-set-test-presets" class="strh-btn">CHECK PRESETS</button>
+                    <div id="strh-set-status" class="strh-statusline"></div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
