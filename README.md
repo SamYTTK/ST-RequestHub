@@ -35,7 +35,7 @@ overview that shows which profiles and models have been used.
 
 ## Dependencies
 
-None. RequestHub only needs SillyTavern itself — no other extensions.
+None.
 
 ## Good to know
 
@@ -43,5 +43,4 @@ None. RequestHub only needs SillyTavern itself — no other extensions.
   never writes anything anywhere — whatever asked it is responsible for what
   happens with the answer.
 - If you build extensions (or are an AI agent wiring one up), the technical
-  manual is `HUB_Documentation.md` in this repo. This README is the human
-  one; that file is the other one.
+  manual is `HUB_Documentation.md` in this repo.
