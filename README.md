@@ -47,6 +47,8 @@ None.
   `https://opencode.ai/inference/openai/v1/chat/completions` with your
   service key and model, and the hub sends the required
   `x-opencode-session` header with a stable per-chat id automatically.
-  Details in `HUB_Documentation.md` §5c.
+  Each profile also has a MODELS button that lists what the endpoint
+  serves for its key, so you can pick a model instead of typing its id.
+  Details in `HUB_Documentation.md` §5c (harness) and §9b (catalog).
 - If you build extensions (or are an AI agent wiring one up), the technical
   manual is `HUB_Documentation.md` in this repo.

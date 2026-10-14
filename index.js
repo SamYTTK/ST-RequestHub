@@ -1,10 +1,11 @@
-import { generate, request, runAgent, decide, validateRequest, listTools, listApiProfiles, getUsageStats, getRecentRequests, clearUsageStats, hubHelpers, HubError, HUB_DEFAULTS } from './lib/hub.js';
+import { generate, request, runAgent, decide, validateRequest, listTools, listApiProfiles, listModels, getUsageStats, getRecentRequests, clearUsageStats, hubHelpers, HubError, HUB_DEFAULTS } from './lib/hub.js';
 import { ensureHarnessSession, clearHarnessSessions, SESSION_HEADER_DEFAULT } from './lib/harness.js';
+import { clearModelsCache } from './lib/models.js';
 
 const MODULE_NAME = 'ST-RequestHub';
 const EXT_PATH = 'third-party/ST-RequestHub';
 const API_VERSION = 6;
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 
 const DEFAULTS = HUB_DEFAULTS;
 
@@ -76,7 +77,7 @@ function registerGlobal() {
         name: 'ST-RequestHub',
         version: VERSION,
         apiVersion: API_VERSION,
-        capabilities: ['request', 'generate', 'decide', 'agent', 'tools', 'profiles', 'presets', 'messages', 'worldinfo', 'tokens', 'test', 'stats', 'console', 'harness'],
+        capabilities: ['request', 'generate', 'decide', 'agent', 'tools', 'profiles', 'models', 'presets', 'messages', 'worldinfo', 'tokens', 'test', 'stats', 'console', 'harness'],
         isReady: () => {
             try {
                 return !getContext().extensionSettings.disabledExtensions.includes('ST-RequestHub');
@@ -96,6 +97,8 @@ function registerGlobal() {
         validateRequest,
         listTools,
         listApiProfiles,
+        listModels,
+        clearModelsCache,
         listPresets: hubHelpers.listPresets,
         getPresetSamplers: hubHelpers.getPresetSamplers,
         resolveSamplers: hubHelpers.resolveSamplers,

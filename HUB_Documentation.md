@@ -36,8 +36,8 @@ extension (or medium) that sends the request.
 - Version tolerance: check `hub.apiVersion` (number, currently `6`) and the
   `hub.capabilities` array instead of hard-coding behavior. Require only the
   capabilities you use (`'request'`, `'decide'`, `'agent'`, `'tools'`,
-  `'profiles'`, `'presets'`, `'stats'`, `'harness'`, …).
-- `hub.version` is the package version (currently `1.6.0`).
+  `'profiles'`, `'models'`, `'presets'`, `'stats'`, `'harness'`, …).
+- `hub.version` is the package version (currently `1.6.1`).
 
 ## 3. Quick start (lorebook example)
 
@@ -476,6 +476,29 @@ hub.clearUsageStats();     // reset counters + ring
 Capabilities for this area: `'stats'`, `'console'`. Profile TEST buttons use
 `hub.testConnection()` for chat endpoints and `hub.testDecideConnection()`
 for Laya-style ones (auto-selected per profile).
+
+## 9b. Model catalog (no more hand-typed model ids)
+
+```js
+const { models, cached, url, profile } = await hub.listModels({
+    apiProfile: 'opencode-go',   // or connection: { apiUrl, apiKey }
+    refresh: false,              // true to bypass the ~15min cache
+});
+console.log(models.map((m) => m.id)); // e.g. ['kimi-k2.6', 'glm-5.3', …]
+```
+
+- Derives the catalog URL from the profile's `apiUrl` (`…/chat/completions`
+  → `…/v1/models`; bare hosts → `…/v1/models`) and GETs it **with the
+  resolved key**, so keyed servers list only what the key may use. The key
+  never appears in the result. Proxy-first, direct fallback (same as chat).
+- Results cache per endpoint (~15 min); `hub.clearModelsCache(prefix?)`
+  drops entries. Decision endpoints throw `CATALOG_UNSUPPORTED` (they serve
+  no catalog); empty-URL requests throw `CONFIG` (the ST-backend route has
+  nothing listable — use the preset list instead).
+- The Hub Console shows a **MODELS** button per profile: searchable popup,
+  click fills the profile's model field. TEST also warns when the saved
+  model id is absent from the current catalog (renamed/retired models).
+- Capability: `'models'`.
 
 ## 10. Instructions for future agents integrating with the hub
 

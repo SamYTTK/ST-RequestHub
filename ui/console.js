@@ -129,6 +129,102 @@ function isDecideProfile(p) {
     return model.startsWith('laya') || url.includes('systemone') || url.includes('11435');
 }
 
+function fmtAge(ts) {
+    const s = Math.max(0, Math.round((Date.now() - Number(ts)) / 1000));
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    return `${Math.floor(m / 60)}h ago`;
+}
+
+/**
+ * Searchable model picker popup. Lists what the profile's endpoint serves
+ * for its key (keyed fetch, hub-side resolved — never displayed), filters
+ * as you type, and fills the profile model on pick.
+ */
+async function openModelPicker(p, onPick) {
+    const h = hub();
+    const overlay = document.createElement('div');
+    overlay.className = 'strh-overlay';
+    overlay.innerHTML = `
+        <div class="strh-picker" role="dialog" aria-label="Pick a model">
+            <div class="strh-picker-head">
+                <span class="strh-picker-title">MODELS · ${esc(p.name)}</span>
+                <button class="strh-btn strh-btn--sm strh-picker-close">✕</button>
+            </div>
+            <input class="strh-picker-search" placeholder="Search models…" autocomplete="off">
+            <div class="strh-picker-status strh-dim">Loading catalog…</div>
+            <div class="strh-picker-list"></div>
+            <div class="strh-picker-foot">
+                <span class="strh-picker-meta strh-dim"></span>
+                <button class="strh-btn strh-btn--sm strh-picker-refresh">REFRESH</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    const close = () => {
+        document.removeEventListener('keydown', onKey);
+        overlay.remove();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('.strh-picker-close')?.addEventListener('click', close);
+
+    const search = overlay.querySelector('.strh-picker-search');
+    const status = overlay.querySelector('.strh-picker-status');
+    const list = overlay.querySelector('.strh-picker-list');
+    const meta = overlay.querySelector('.strh-picker-meta');
+    let models = [];
+
+    const render = () => {
+        const q = search.value.trim().toLowerCase();
+        const shown = q ? models.filter((m) => m.id.toLowerCase().includes(q)) : models;
+        list.innerHTML = '';
+        if (!shown.length) {
+            list.innerHTML = '<div class="strh-empty">— no matches —</div>';
+            return;
+        }
+        for (const m of shown.slice(0, 200)) {
+            const b = document.createElement('button');
+            b.className = 'strh-picker-item';
+            b.type = 'button';
+            b.textContent = m.id;
+            if (m.id === (p.model ?? '')) b.classList.add('is-current');
+            b.addEventListener('click', () => { onPick(m.id); close(); });
+            list.appendChild(b);
+        }
+        if (shown.length > 200) {
+            const more = document.createElement('div');
+            more.className = 'strh-empty';
+            more.textContent = `— ${shown.length - 200} more, keep typing to narrow —`;
+            list.appendChild(more);
+        }
+    };
+    search.addEventListener('input', render);
+
+    const load = async (refresh) => {
+        status.textContent = 'Loading catalog…';
+        list.innerHTML = '';
+        try {
+            const out = await h.listModels({
+                connection: { apiUrl: p.apiUrl ?? '', apiKey: p.apiKey ?? '' },
+                refresh: !!refresh,
+            });
+            models = out.models ?? [];
+            status.textContent = '';
+            meta.textContent = `${models.length} model${models.length === 1 ? '' : 's'}${out.cached ? ` · cached ${fmtAge(out.cachedAt)}` : ' · live'}`;
+            render();
+        } catch (e) {
+            models = [];
+            status.innerHTML = `<span class="strh-err">●</span> ${esc(e?.message ?? e)}`;
+            meta.textContent = '';
+        }
+    };
+    overlay.querySelector('.strh-picker-refresh')?.addEventListener('click', () => load(true));
+    search.focus();
+    await load(false);
+}
+
 function renderProfiles(root) {
     const h = hub();
     const s = loadSettings();
@@ -155,6 +251,7 @@ function renderProfiles(root) {
             <input data-k="apiKey" type="password" placeholder="API key" value="${esc(p.apiKey)}" autocomplete="new-password">
             <input data-k="model" placeholder="Default model" value="${esc(p.model)}">
             <span class="strh-pf-flags">${p.apiKey ? '<span class="strh-ok" title="Key stored">●KEY</span>' : '<span class="strh-dim">○KEY</span>'}${isDecideProfile(p) ? '<span class="strh-tag">DECIDE</span>' : '<span class="strh-tag">CHAT</span>'}${p.sessionId ? '<span class="strh-tag" title="Harness session id stored">HARNESS</span>' : ''}</span>
+            <button class="strh-btn strh-btn--sm strh-pf-models" title="Pick a model from this endpoint's catalog">MODELS</button>
             <button class="strh-btn strh-btn--sm strh-pf-test">TEST</button>
             <button class="strh-btn strh-btn--sm strh-btn--danger strh-pf-del" title="Delete profile">✕</button>
             <div class="strh-pf-sub">
@@ -189,6 +286,16 @@ function renderProfiles(root) {
             renderProfiles(root);
             renderOverview(root);
         });
+        row.querySelector('.strh-pf-models')?.addEventListener('click', (ev) => {
+            const btn = ev.currentTarget;
+            btn.disabled = true;
+            openModelPicker(p, (id) => {
+                p.model = id;
+                ctx().saveSettingsDebounced();
+                renderProfiles(root);
+                renderOverview(root);
+            }).finally(() => { btn.disabled = false; });
+        });
         row.querySelector('.strh-pf-test')?.addEventListener('click', async (ev) => {
             const btn = ev.currentTarget;
             const status = root.querySelector('#strh-pf-status');
@@ -199,8 +306,18 @@ function renderProfiles(root) {
                 const res = isDecideProfile(p)
                     ? await h.testDecideConnection(conn)
                     : await h.testConnection({ ...conn, harness });
+                let extra = '';
+                if (res.success && !isDecideProfile(p) && typeof h.listModels === 'function') {
+                    try {
+                        const cat = await h.listModels({ connection: conn });
+                        const ids = new Set((cat.models ?? []).map((m) => m.id));
+                        if (ids.size && p.model && !ids.has(String(p.model).trim())) {
+                            extra = ' <span class="strh-dim">· model not in current catalog (may be renamed/retired)</span>';
+                        }
+                    } catch { /* catalog best-effort only — connection result stands */ }
+                }
                 if (status) {
-                    status.innerHTML = `<span class="${res.success ? 'strh-ok' : 'strh-err'}">●</span> ${esc(p.name)} — ${esc(res.message)}`;
+                    status.innerHTML = `<span class="${res.success ? 'strh-ok' : 'strh-err'}">●</span> ${esc(p.name)} — ${esc(res.message)}${extra}`;
                 }
             } catch (e) {
                 if (status) status.innerHTML = `<span class="strh-err">●</span> ${esc(p.name)} — ${esc(e?.message ?? e)}`;
