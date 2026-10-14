@@ -154,9 +154,14 @@ function renderProfiles(root) {
             <input data-k="apiUrl" placeholder="Base URL (empty = ST backend)" value="${esc(p.apiUrl)}">
             <input data-k="apiKey" type="password" placeholder="API key" value="${esc(p.apiKey)}" autocomplete="new-password">
             <input data-k="model" placeholder="Default model" value="${esc(p.model)}">
-            <span class="strh-pf-flags">${p.apiKey ? '<span class="strh-ok" title="Key stored">●KEY</span>' : '<span class="strh-dim">○KEY</span>'}${isDecideProfile(p) ? '<span class="strh-tag">DECIDE</span>' : '<span class="strh-tag">CHAT</span>'}</span>
+            <span class="strh-pf-flags">${p.apiKey ? '<span class="strh-ok" title="Key stored">●KEY</span>' : '<span class="strh-dim">○KEY</span>'}${isDecideProfile(p) ? '<span class="strh-tag">DECIDE</span>' : '<span class="strh-tag">CHAT</span>'}${p.sessionId ? '<span class="strh-tag" title="Harness session id stored">HARNESS</span>' : ''}</span>
             <button class="strh-btn strh-btn--sm strh-pf-test">TEST</button>
-            <button class="strh-btn strh-btn--sm strh-btn--danger strh-pf-del" title="Delete profile">✕</button>`;
+            <button class="strh-btn strh-btn--sm strh-btn--danger strh-pf-del" title="Delete profile">✕</button>
+            <div class="strh-pf-sub">
+                <input data-k="sessionId" placeholder="Harness session id (empty = auto per chat)" value="${esc(p.sessionId ?? '')}" autocomplete="off" title="Stable per-conversation id sent as x-opencode-session (or the profile's custom header). Empty = auto-generated per chat.">
+                <input data-k="userAgent" placeholder="Harness user agent (empty = hub default)" value="${esc(p.userAgent ?? '')}" autocomplete="off" title="Distinctive client identity for harness-gated APIs. Browsers cannot override User-Agent directly — the value is attempted plus sent as x-harness-user-agent; the session header above is the operative signal.">
+                <button class="strh-btn strh-btn--sm strh-pf-newsession" title="Generate a fresh stored session id">↻ NEW ID</button>
+            </div>`;
         row.querySelectorAll('input').forEach((inp) => {
             inp.addEventListener('change', () => {
                 p[inp.dataset.k] = inp.value;
@@ -164,6 +169,18 @@ function renderProfiles(root) {
                 renderProfiles(root);
                 renderOverview(root);
             });
+        });
+        row.querySelector('.strh-pf-newsession')?.addEventListener('click', () => {
+            try {
+                const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                    ? crypto.randomUUID()
+                    : `harness-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+                p.sessionId = id;
+            } catch {
+                p.sessionId = `harness-${Date.now()}`;
+            }
+            ctx().saveSettingsDebounced();
+            renderProfiles(root);
         });
         row.querySelector('.strh-pf-del')?.addEventListener('click', () => {
             s.apiProfiles = (s.apiProfiles ?? []).filter((x) => x !== p);
@@ -178,9 +195,10 @@ function renderProfiles(root) {
             btn.disabled = true;
             try {
                 const conn = { apiUrl: p.apiUrl ?? '', apiKey: p.apiKey ?? '', model: p.model ?? '' };
+                const harness = { sessionId: p.sessionId ?? '', userAgent: p.userAgent ?? '' };
                 const res = isDecideProfile(p)
                     ? await h.testDecideConnection(conn)
-                    : await h.testConnection(conn);
+                    : await h.testConnection({ ...conn, harness });
                 if (status) {
                     status.innerHTML = `<span class="${res.success ? 'strh-ok' : 'strh-err'}">●</span> ${esc(p.name)} — ${esc(res.message)}`;
                 }
@@ -208,8 +226,10 @@ function bindProfiles(root) {
             apiUrl: root.querySelector('#strh-pf-url')?.value?.trim() ?? '',
             apiKey: root.querySelector('#strh-pf-key')?.value ?? '',
             model: root.querySelector('#strh-pf-model')?.value?.trim() ?? '',
+            sessionId: root.querySelector('#strh-pf-session')?.value?.trim() ?? '',
+            userAgent: root.querySelector('#strh-pf-ua')?.value?.trim() ?? '',
         });
-        for (const id of ['#strh-pf-name', '#strh-pf-url', '#strh-pf-key', '#strh-pf-model']) {
+        for (const id of ['#strh-pf-name', '#strh-pf-url', '#strh-pf-key', '#strh-pf-model', '#strh-pf-session', '#strh-pf-ua']) {
             const el = root.querySelector(id);
             if (el) el.value = '';
         }
@@ -240,6 +260,23 @@ function bindSettings(root) {
     bindNum('#strh-set-maxsteps', 'defaultMaxSteps');
     bindNum('#strh-set-maxsteps-cap', 'maxStepsCap');
     bindNum('#strh-set-total-timeout', 'defaultTotalTimeoutMs');
+    const ua = root.querySelector('#strh-set-ua');
+    if (ua) {
+        ua.value = s.harnessUserAgent ?? 'ST-RequestHub';
+        ua.addEventListener('change', () => {
+            s.harnessUserAgent = ua.value.trim() || 'ST-RequestHub';
+            ctx().saveSettingsDebounced();
+        });
+    }
+    const scope = root.querySelector('#strh-set-scope');
+    if (scope) {
+        scope.value = s.defaultSessionScope ?? 'chat';
+        scope.addEventListener('change', () => {
+            const v = scope.value.trim().toLowerCase() || 'chat';
+            s.defaultSessionScope = v;
+            ctx().saveSettingsDebounced();
+        });
+    }
     const proxy = root.querySelector('#strh-set-proxy');
     if (proxy) {
         proxy.checked = s.preferProxy !== false;

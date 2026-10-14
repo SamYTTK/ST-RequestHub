@@ -1,9 +1,10 @@
 import { generate, request, runAgent, decide, validateRequest, listTools, listApiProfiles, getUsageStats, getRecentRequests, clearUsageStats, hubHelpers, HubError, HUB_DEFAULTS } from './lib/hub.js';
+import { ensureHarnessSession, clearHarnessSessions, SESSION_HEADER_DEFAULT } from './lib/harness.js';
 
 const MODULE_NAME = 'ST-RequestHub';
 const EXT_PATH = 'third-party/ST-RequestHub';
-const API_VERSION = 5;
-const VERSION = '1.5.0';
+const API_VERSION = 6;
+const VERSION = '1.6.0';
 
 const DEFAULTS = HUB_DEFAULTS;
 
@@ -75,7 +76,7 @@ function registerGlobal() {
         name: 'ST-RequestHub',
         version: VERSION,
         apiVersion: API_VERSION,
-        capabilities: ['request', 'generate', 'decide', 'agent', 'tools', 'profiles', 'presets', 'messages', 'worldinfo', 'tokens', 'test', 'stats', 'console'],
+        capabilities: ['request', 'generate', 'decide', 'agent', 'tools', 'profiles', 'presets', 'messages', 'worldinfo', 'tokens', 'test', 'stats', 'console', 'harness'],
         isReady: () => {
             try {
                 return !getContext().extensionSettings.disabledExtensions.includes('ST-RequestHub');
@@ -104,6 +105,9 @@ function registerGlobal() {
         fitBudget: hubHelpers.fitBudget,
         testConnection: hubHelpers.testConnection,
         testDecideConnection: hubHelpers.testDecideConnection,
+        ensureHarnessSession,
+        clearHarnessSessions,
+        sessionHeaderDefault: SESSION_HEADER_DEFAULT,
         HubError,
         on,
         off,

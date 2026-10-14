@@ -42,5 +42,11 @@ None.
 - RequestHub only runs requests. It never decides anything on its own and
   never writes anything anywhere — whatever asked it is responsible for what
   happens with the answer.
+- Profiles can also carry **harness identity** (session id + user agent) for
+  gated APIs such as OpenCode Go: point a profile at
+  `https://opencode.ai/inference/openai/v1/chat/completions` with your
+  service key and model, and the hub sends the required
+  `x-opencode-session` header with a stable per-chat id automatically.
+  Details in `HUB_Documentation.md` §5c.
 - If you build extensions (or are an AI agent wiring one up), the technical
   manual is `HUB_Documentation.md` in this repo.

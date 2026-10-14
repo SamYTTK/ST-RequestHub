@@ -33,11 +33,11 @@ extension (or medium) that sends the request.
 - **If the hub is missing or disabled, fall through gracefully.** Never crash
   the host extension: disable the hub-dependent feature, show a notice, or
   degrade to normal ST behavior. The hub being absent must never break a chat.
-- Version tolerance: check `hub.apiVersion` (number, currently `5`) and the
+- Version tolerance: check `hub.apiVersion` (number, currently `6`) and the
   `hub.capabilities` array instead of hard-coding behavior. Require only the
   capabilities you use (`'request'`, `'decide'`, `'agent'`, `'tools'`,
-  `'profiles'`, `'presets'`, `'stats'`, …).
-- `hub.version` is the package version (currently `1.5.0`).
+  `'profiles'`, `'presets'`, `'stats'`, `'harness'`, …).
+- `hub.version` is the package version (currently `1.6.0`).
 
 ## 3. Quick start (lorebook example)
 
@@ -109,8 +109,16 @@ console.log(run.steps);   // auditable trace of every tool round
                                         // (decide mode: decision-server URL, REQUIRED — §4b)
             apiKey: '…',               // per-request key (stored by the caller, never by the hub)
             model: '…',                // REQUIRED when apiUrl is set; optional override on backend route
+            extraHeaders: { … },       // extra outbound headers, sanitized (§5c); explicit keys win
         },
-        apiProfile: 'ProfileName',     // named hub profile (URL+key+model); explicit fields win per field (§5b)
+        harness: {                      // harness identity for gated APIs, e.g. OpenCode Go (§5c)
+            userAgent: '…',             // '' = hub default ('ST-RequestHub')
+            sessionId: '…',             // stable per-conversation id; '' = auto by scope
+            sessionScope: 'chat',       // 'chat'|'consumer'|'global'|'none'|'custom:<key>'
+            sessionHeader: 'x-opencode-session',
+            sendSessionHeader: true,
+        },
+        apiProfile: 'ProfileName',     // named hub profile (URL+key+model+harness); explicit fields win per field (§5b)
         preset: 'PresetName',          // ST chat-completion preset — IGNORED in decide mode (§4b)
         useOwnConfig: false,           // false = preset samplers win; true = samplers below win
         samplers: { … },               // full per-request config — see §5 (IGNORED in decide mode)
@@ -291,6 +299,83 @@ minimizes exposure (names travel, keys don't; masked settings UI; redacted
 them. Do not add extra key-handling code in consumers — send the profile name
 and let the hub resolve it.
 
+## 5c. Harness identity (gated APIs such as OpenCode Go)
+
+Some providers only accept traffic that looks like it comes from a coding
+harness instead of a generic HTTP client. The wire protocol stays
+OpenAI-compatible — what they additionally require is **harness identity in
+headers** (see OpenCode Go docs, "Where can I use it?"):
+
+1. a stable **session id per conversation** (`x-opencode-session` on Go),
+   used upstream for routing + prompt caching, and
+2. a distinctive **`User-Agent`** (e.g. `my-coding-agent/1.0`) instead of a
+   generic SDK / HTTP-library name.
+
+The hub sends both whenever `settings.harness` (or the profile's harness
+fields) carries them — on `single` AND `agent` modes, on every retry and
+every agent step with the same id:
+
+```js
+// One-off request with an explicit session (the caller owns stability here)
+const res = await hub.request({
+    mode: 'single',
+    input: { text: 'Refactor this function: …' },
+    settings: {
+        connection: {
+            apiUrl: 'https://opencode.ai/inference/openai/v1/chat/completions',
+            apiKey: '<service-account-key>',
+            model: 'kimi-k2.6',
+        },
+        harness: {
+            userAgent: 'MyExtension/1.0',
+            sessionId: 'a-stable-uuid-per-conversation', // re-send SAME id next turn
+        },
+        maxTokens: 2048,
+    },
+    consumer: 'MyExtension',
+});
+
+// Easier: name a profile in the Hub Console (URL + key + model + optional
+// session id / user agent) and let the hub resolve + auto-scope sessions:
+const res2 = await hub.request({
+    mode: 'agent',
+    input: { text: 'Find and fix the bug described in the chat.' },
+    settings: { apiProfile: 'opencode-go' },
+    tools: { include: ['MySearchTool'] },
+    limits: { maxSteps: 10 },
+    consumer: 'MyExtension',
+});
+```
+
+Rules that keep you off the abuse radar:
+
+- **One id per conversation.** Default scope `'chat'` auto-generates and
+  persists one id per `consumer + chat` and reuses it across all requests,
+  retries and agent steps. `'consumer'` scopes per extension, `'global'`
+  shares one id, `'custom:<key>'` scopes to your own key, `'none'` sends no
+  auto id (explicit `sessionId` still wins). Never mint an id per request.
+- **Pre-resolve when you need to display or correlate it:**
+  `hub.ensureHarnessSession({ consumer: 'MyExtension', scope: 'chat' })`
+  returns the same stored id the next send will use.
+- **Routing:** harness requests prefer ST's `/proxy/` CORS proxy first
+  (it forwards custom headers server-side; requires `enableCorsProxy` on
+  the ST server for remote hosts), then fall back to direct `fetch`.
+- **Browser honesty:** `fetch` cannot set `User-Agent` (forbidden header —
+  silently dropped). The hub still attempts it and additionally sends the
+  value as `x-harness-user-agent`. The **session header is the operative
+  signal**; a browser UA is already a distinctive non-SDK identity.
+- **`extraHeaders`** (`connection.extraHeaders`) carries any other
+  `X-*` headers a gated API asks for. Values must be strings; auth/framing
+  headers (`authorization`, `content-type`, `host`, …) are dropped with a
+  warning. Explicit keys beat profile keys per key.
+- Full endpoint paths are preserved (`…/responses`, `…/messages`,
+  `:generateContent`, …) — only bare hosts / `/v1` get
+  `/v1/chat/completions` appended.
+- Agent mode with a focused tool allowlist is the closest traffic shape to
+  a coding harness; single-shot calls should share the conversation's
+  session id and a stable system-prompt prefix for cache hits.
+- Decide mode ignores harness/extra headers (decision endpoints need none).
+
 ## 6. Tools (agent mode)
 
 - Tool source is ST core's `ToolManager` registry — the same one
@@ -339,8 +424,9 @@ question id to its typed answer (`choice`/`score`/`noul` + `confidence` +
 ## 8. Capabilities and limitations (read carefully)
 
 **Can do:** single-turn generation on any OpenAI-compatible endpoint or the ST
-backend; multi-round autonomous tool loops; typed decisions on Laya-style
-decision endpoints (`mode:'decide'`, §4b); per-request model + full sampler
+backend; multi-round autonomous tool loops; harness-identified requests for
+gated APIs (stable session id + user agent + extra headers, §5c); typed
+decisions on Laya-style decision endpoints (`mode:'decide'`, §4b); per-request model + full sampler
 config; preset-driven or own-config sampling; registry + inline tools with
 per-run scoping; retry/timeout/stream-fallback ownership; token helpers
 (`countTokens`, `fitBudget`), prompt assembly (`buildMessages`),

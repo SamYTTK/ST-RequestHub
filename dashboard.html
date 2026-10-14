@@ -59,6 +59,8 @@
                     <input id="strh-pf-url" placeholder="Base URL (empty = ST backend)" autocomplete="off">
                     <input id="strh-pf-key" type="password" placeholder="API key" autocomplete="new-password">
                     <input id="strh-pf-model" placeholder="Default model" autocomplete="off">
+                    <input id="strh-pf-session" placeholder="Harness session id (optional)" autocomplete="off">
+                    <input id="strh-pf-ua" placeholder="Harness user agent (optional)" autocomplete="off">
                     <button id="strh-pf-add" class="strh-btn">ADD PROFILE</button>
                 </div>
             </div>
@@ -83,6 +85,11 @@
                     <label class="strh-field"><span>Default max steps</span><input type="number" id="strh-set-maxsteps" min="1" max="100"></label>
                     <label class="strh-field"><span>Max steps cap</span><input type="number" id="strh-set-maxsteps-cap" min="1" max="100"></label>
                     <label class="strh-field"><span>Total timeout ms (0 = off)</span><input type="number" id="strh-set-total-timeout" min="0" step="1000"></label>
+                </div>
+                <div class="strh-card">
+                    <div class="strh-card-kicker">HARNESS IDENTITY <span class="strh-dim">(GATED APIS)</span></div>
+                    <label class="strh-field"><span>Default user agent</span><input id="strh-set-ua" autocomplete="off"></label>
+                    <label class="strh-field"><span>Default session scope (chat / consumer / global / none)</span><input id="strh-set-scope" autocomplete="off"></label>
                 </div>
                 <div class="strh-card">
                     <div class="strh-card-kicker">DIAGNOSTICS</div>

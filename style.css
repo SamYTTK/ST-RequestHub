@@ -155,3 +155,10 @@
 .strh-pf-flags { display: flex; gap: 6px; align-items: center; font-size: 10px; }
 .strh-pf-add { display: grid; grid-template-columns: 1fr 1.4fr 1fr 1fr auto; gap: 6px; margin-top: 10px; }
 @media (max-width: 760px) { .strh-pf-add { grid-template-columns: 1fr 1fr; } }
+.strh-pf-add #strh-pf-session, .strh-pf-add #strh-pf-ua { grid-column: span 2; }
+@media (max-width: 760px) { .strh-pf-add #strh-pf-session, .strh-pf-add #strh-pf-ua { grid-column: span 1; } }
+.strh-pf-sub {
+    grid-column: 1 / -1;
+    display: grid; grid-template-columns: 1.4fr 1.4fr auto; gap: 6px;
+}
+@media (max-width: 760px) { .strh-pf-sub { grid-template-columns: 1fr 1fr; } }
