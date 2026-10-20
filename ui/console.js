@@ -363,20 +363,25 @@ function bindProfiles(root) {
 
 function bindSettings(root) {
     const s = loadSettings();
-    const bindNum = (id, key) => {
+    const bindNum = (id, key, { min = 0 } = {}) => {
         const el = root.querySelector(id);
         if (!el) return;
         el.value = s[key];
         el.addEventListener('change', () => {
-            s[key] = Number(el.value) || 0;
+            let v = Number(el.value);
+            if (!Number.isFinite(v)) v = s[key];
+            v = Math.round(v);
+            if (v < min) v = min;
+            s[key] = v;
+            el.value = v;
             ctx().saveSettingsDebounced();
         });
     };
-    bindNum('#strh-set-timeout', 'defaultTimeoutMs');
-    bindNum('#strh-set-retries', 'defaultRetries');
-    bindNum('#strh-set-maxsteps', 'defaultMaxSteps');
-    bindNum('#strh-set-maxsteps-cap', 'maxStepsCap');
-    bindNum('#strh-set-total-timeout', 'defaultTotalTimeoutMs');
+    bindNum('#strh-set-timeout', 'defaultTimeoutMs', { min: 0 });
+    bindNum('#strh-set-retries', 'defaultRetries', { min: 0 });
+    bindNum('#strh-set-maxsteps', 'defaultMaxSteps', { min: 1 });
+    bindNum('#strh-set-maxsteps-cap', 'maxStepsCap', { min: 1 });
+    bindNum('#strh-set-total-timeout', 'defaultTotalTimeoutMs', { min: 0 });
     const ua = root.querySelector('#strh-set-ua');
     if (ua) {
         ua.value = s.harnessUserAgent ?? 'ST-RequestHub';
@@ -422,6 +427,119 @@ function bindOverview(root) {
     });
 }
 
+function fmtNum(n) {
+    const v = Number(n) || 0;
+    if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
+    if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+    if (v >= 1e3) return `${(v / 1e3).toFixed(1)}k`;
+    return String(Math.round(v));
+}
+function fmtCost(n) {
+    if (n === null || n === undefined || !Number.isFinite(Number(n))) return '—';
+    const v = Number(n);
+    return v < 0.01 && v > 0 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
+}
+function fmtReset(ms) {
+    if (ms === null || ms === undefined) return '—';
+    const s = Math.max(0, Math.round(Number(ms) / 1000));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ${s % 60}s`;
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+}
+function usageWindowRow(w) {
+    const pct = w.usedPercent ?? (w.remainingPercent !== null && w.remainingPercent !== undefined ? 100 - w.remainingPercent : 0);
+    const label = w.limit !== null && w.limit !== undefined
+        ? `${w.remaining ?? '?'} / ${w.limit} left`
+        : (w.remaining !== null && w.remaining !== undefined ? `${fmtNum(w.remaining)} left` : `${fmtNum(w.used)} used`);
+    return barRow(`${w.kind}${w.family ? ` · ${w.family}` : ''}`, `${label} · reset ${fmtReset(w.resetInMs)}`, Math.max(0.02, Math.min(1, Number(pct) / 100)));
+}
+
+function renderUsage(root) {
+    const h = hub();
+    if (!h || typeof h.getUsageSnapshot !== 'function') return;
+    const snap = h.getUsageSnapshot();
+    const t = snap.totals || {};
+    const totalsEl = root.querySelector('#strh-us-totals');
+    if (totalsEl) {
+        totalsEl.innerHTML = `
+            <div class="strh-kv"><span>REQUESTS</span><b>${fmtNum(t.requests)}</b></div>
+            <div class="strh-kv"><span>ERRORS</span><b>${fmtNum(t.errors)}</b></div>
+            <div class="strh-kv"><span>TOKENS IN</span><b>${fmtNum(t.promptTokens)}</b></div>
+            <div class="strh-kv"><span>TOKENS OUT</span><b>${fmtNum(t.completionTokens)}</b></div>
+            <div class="strh-kv"><span>CACHED</span><b>${fmtNum(t.cachedTokens)}</b></div>
+            <div class="strh-kv"><span>REASONING</span><b>${fmtNum(t.reasoningTokens)}</b></div>
+            <div class="strh-kv"><span>COST</span><b>${fmtCost(t.cost)}</b></div>`;
+    }
+    const day = (snap.days || [])[snap.days.length - 1];
+    const todayEl = root.querySelector('#strh-us-today');
+    if (todayEl) {
+        todayEl.innerHTML = day
+            ? `<div class="strh-kv"><span>${esc(day.day)}</span><b>${fmtNum(day.requests)} req</b></div>
+               <div class="strh-kv"><span>TOKENS</span><b>${fmtNum(day.totalTokens)}</b></div>
+               <div class="strh-kv"><span>ERRORS</span><b>${fmtNum(day.errors)}</b></div>
+               <div class="strh-kv"><span>COST</span><b>${fmtCost(day.cost)}</b></div>`
+            : '<div class="strh-empty">— no usage recorded yet —</div>';
+    }
+    const limitsEl = root.querySelector('#strh-us-limits');
+    if (limitsEl) {
+        const entries = Object.values(snap.limits || {});
+        limitsEl.innerHTML = entries.length
+            ? entries.map((e) => {
+                const head = `<div class="strh-kv"><span>${esc(e.profile || '(default)')}</span><b>${esc(e.providerHost || '')}</b></div>`;
+                const plan = e.planLabel ? `<div class="strh-dim">${esc(e.planLabel)}</div>` : '';
+                return plan + head + e.windows.map(usageWindowRow).join('');
+            }).join('')
+            : '<div class="strh-empty">— no rate-limit headers seen yet —</div>';
+    }
+    const modelsEl = root.querySelector('#strh-us-models');
+    if (modelsEl) modelsEl.innerHTML = breakdown(t.byModel);
+    const profilesEl = root.querySelector('#strh-us-profiles');
+    if (profilesEl) {
+        const byKey = Object.entries(t.byKey || {});
+        profilesEl.innerHTML = byKey.length
+            ? byKey.map(([key, v]) => `<div class="strh-kv"><span>${esc(v.profile || '(default)')} · ${esc(v.providerHost || '')} · ${esc(key.split('|')[2] || '')}</span><b>${fmtNum(v.requests)} req · ${fmtNum(v.totalTokens)} tok · ${fmtCost(v.cost)}</b></div>`).join('')
+            : '<div class="strh-empty">— no keys used yet —</div>';
+    }
+    const recentEl = root.querySelector('#strh-us-recent');
+    if (recentEl) {
+        const rows = (snap.recent || []).slice(0, 30);
+        recentEl.innerHTML = rows.length
+            ? `<table class="strh-table"><thead><tr><th>TIME</th><th>CONSUMER</th><th>PROFILE / MODEL</th><th>TOKENS</th><th>COST</th><th>STATUS</th></tr></thead><tbody>`
+                + rows.map((e) => `<tr><td>${fmtTime(e.ts)}</td><td>${esc(e.consumer || '—')}</td>`
+                    + `<td>${esc(e.profile || '(default)')} / ${esc(e.model || '—')}</td>`
+                    + `<td>${fmtNum(e.promptTokens)} → ${fmtNum(e.completionTokens)}${e.cachedTokens ? ` (${fmtNum(e.cachedTokens)} cached)` : ''}</td>`
+                    + `<td>${fmtCost(e.cost)}</td>`
+                    + `<td>${e.ok ? 'OK' : esc(e.errorCode || 'ERR')}${e.estimated ? ' · est' : ''}</td></tr>`).join('')
+                + '</tbody></table>'
+            : '<div class="strh-empty">— no recent usage —</div>';
+    }
+}
+
+function bindUsage(root) {
+    root.querySelector('#strh-us-refresh')?.addEventListener('click', async () => {
+        const h = hub();
+        const status = root.querySelector('#strh-us-status');
+        if (!h || typeof h.refreshQuota !== 'function') return;
+        const s = loadSettings();
+        const names = (s.apiProfiles || []).map((p) => p?.name).filter(Boolean);
+        if (!names.length) names.push('');
+        if (status) status.textContent = 'Refreshing provider quota…';
+        const errs = [];
+        for (const name of names) {
+            try { await h.refreshQuota(name); }
+            catch (e) { errs.push(`${name || '(default)'}: ${e?.message || e}`); }
+        }
+        if (status) status.textContent = errs.length ? `Quota: ${errs.join(' · ')}` : 'Quota refreshed.';
+        renderUsage(root);
+    });
+    root.querySelector('#strh-us-clear')?.addEventListener('click', () => {
+        hub()?.clearUsage?.();
+        renderUsage(root);
+    });
+}
+
 function bindTabs(root) {
     root.querySelectorAll('[data-strh-tab]').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -430,6 +548,7 @@ function bindTabs(root) {
             root.querySelectorAll('[data-strh-view]').forEach((v) => v.classList.toggle('is-active', v.dataset.strhView === tab));
             if (tab === 'overview') renderOverview(root);
             if (tab === 'profiles') renderProfiles(root);
+            if (tab === 'usage') renderUsage(root);
         });
     });
 }
@@ -455,12 +574,16 @@ export async function openHubConsole() {
         bindOverview(root);
         bindProfiles(root);
         bindSettings(root);
+        bindUsage(root);
         renderOverview(root);
         renderProfiles(root);
+        renderUsage(root);
         const timer = setInterval(() => {
             try {
                 const ov = root.querySelector('[data-strh-view="overview"]');
                 if (ov?.classList.contains('is-active')) renderOverview(root);
+                const us = root.querySelector('[data-strh-view="usage"]');
+                if (us?.classList.contains('is-active')) renderUsage(root);
             } catch { /* popup gone — cleaned up below */ }
         }, REFRESH_MS);
         try {

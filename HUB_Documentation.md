@@ -33,11 +33,11 @@ extension (or medium) that sends the request.
 - **If the hub is missing or disabled, fall through gracefully.** Never crash
   the host extension: disable the hub-dependent feature, show a notice, or
   degrade to normal ST behavior. The hub being absent must never break a chat.
-- Version tolerance: check `hub.apiVersion` (number, currently `6`) and the
+- Version tolerance: check `hub.apiVersion` (number, currently `7`) and the
   `hub.capabilities` array instead of hard-coding behavior. Require only the
   capabilities you use (`'request'`, `'decide'`, `'agent'`, `'tools'`,
   `'profiles'`, `'models'`, `'presets'`, `'stats'`, `'harness'`, …).
-- `hub.version` is the package version (currently `1.6.1`).
+- `hub.version` is the package version (currently `1.8.0`).
 
 ## 3. Quick start (lorebook example)
 
@@ -140,7 +140,7 @@ console.log(run.steps);   // auditable trace of every tool round
         choice: 'auto',                // 'auto' | 'none' | { type:'function', function:{ name } }
     },
     limits: {                          // AGENT MODE ONLY
-        maxSteps: 10,                  // model↔tool rounds; clamped to hub cap (default 25)
+        maxSteps: 10,                  // model↔tool rounds; 0 = no cap (bounded by totalTimeoutMs)
         totalTimeoutMs: 600000,        // whole-run wall clock (0 = off)
     },
     label: '…',                        // trace tag, shown in errors/logs
@@ -522,3 +522,82 @@ console.log(models.map((m) => m.id)); // e.g. ['kimi-k2.6', 'glm-5.3', …]
    `SillyTavern.getContext()` and `fetch` in an isolated harness (see
    `hubtest/` notes in the repo history), `node --check` every touched file,
    and never degrade behavior when the hub is absent.
+
+## 11. Trace callbacks (exact model traffic)
+
+`onRound` is a runtime-only attachment (like `onChunk` / `onStep`). It never
+changes wire semantics by itself. Agent rounds stream only when the request
+explicitly sets `settings.stream: true`, uses the direct route, and supplies
+`onRound`; otherwise every round is non-streamed.
+
+```js
+hub.request({
+    mode: 'agent',
+    input: { messages },
+    settings: { stream: true },       // opt in to streamed rounds
+    tools: { include: ['__my_inline_only__'], extra: myTools },
+    limits: { maxSteps: 0 },          // 0 = no step cap; budget via totalTimeoutMs
+    onRound: ({ phase, round, ...evt }) => {
+        // phase: 'request' | 'response' | 'delta' | 'error'
+        // request:  { route, model, profile, presetName, samplers, maxTokens,
+        //             toolChoice, tools: [names], messages: [...] }
+        // response: { content, reasoning, toolCalls, usage, rateLimits,
+        //             durationMs, status }
+        // delta:    { text, reasoning }   (direct route, opted-in streaming)
+        // error:    { errorCode, message, rateLimits, durationMs }
+    },
+    consumer: 'MyExtension',
+});
+```
+
+- Agent `steps[]` and `onStep` include `reasoning`.
+- If a streamed round fails before producing content, the hub retries that
+  round non-streamed once.
+- `limits.maxSteps: 0` means no cap (safety cap 1000 rounds); positive values
+  keep the configured clamp. `totalTimeoutMs` is the real budget.
+- Responses expose `usage` and `rateLimits` when the provider sends them.
+- Trace payloads are deep-copied for the callback and never persisted.
+
+## 12. Usage and quota API
+
+Every `hub.request()` records metadata plus token/cost usage (never prompts,
+answers or raw keys). Keys are reduced to a fingerprint; short keys are masked
+completely.
+
+```js
+hub.getUsageSnapshot({ profile?, model?, consumer? }); // cached, sync
+hub.getUsage(filter);                                  // aggregates
+hub.getRateLimits(filter);                             // normalized windows
+hub.getUsageHistory({ scope, window: 'minute'|'hour'|'day', limit });
+hub.onUsage((event) => { ... });                       // live subscription
+await hub.refreshQuota('profile-name');                // provider probe
+hub.registerQuotaProvider('my-provider', {
+    label: 'My Provider',
+    detect: ({ apiUrl }) => /my-provider/.test(apiUrl),
+    fetch: async ({ apiUrl, apiKey }) => ({ windows: [...], planLabel: '' }),
+});
+hub.listQuotaProviders();
+hub.getKeyInfo('profile-name');                        // fingerprint, masked key
+hub.clearUsage();
+hub.flushUsageWrites?.();                              // flush debounced persistence
+```
+
+Window shape: `{ kind, limit, remaining, used, resetAt, windowSeconds, source,
+confidence, family, valueLabel, usedPercent, remainingPercent, resetInMs }`.
+Kinds include `requests`, `tokens`, `input-tokens`, `output-tokens`,
+`prompt-tokens`, `generated-tokens`, `credits`, `retry`.
+
+Captured automatically:
+- OpenAI/Groq/xAI/Together/Mistral/Fireworks `x-ratelimit-*` (durations).
+- Anthropic `anthropic-ratelimit-*` (ISO resets).
+- OpenRouter `X-RateLimit-*` and `retry-after` (seconds, HTTP-date or ISO).
+- Token usage from Chat Completions / Responses / Anthropic bodies, including
+  cached and reasoning tokens; provider-reported cost, or a configured price
+  table (marked estimated).
+- Built-in quota probes: OpenRouter (`/api/v1/key`), DeepSeek (`/user/balance`),
+  OpenCode Go (`/zen/go/v1/usage`).
+
+Persisted: aggregate counters, daily buckets (31 days), and last-known,
+model-scoped limit windows. Expired windows are dropped on read. The recent
+event ring is session-only. Capabilities: `'trace'`, `'usage'`, `'quota'`,
+`'usage-history'`.

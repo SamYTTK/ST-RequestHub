@@ -1,11 +1,11 @@
-import { generate, request, runAgent, decide, validateRequest, listTools, listApiProfiles, listModels, getUsageStats, getRecentRequests, clearUsageStats, hubHelpers, HubError, HUB_DEFAULTS } from './lib/hub.js';
+import { generate, request, runAgent, decide, validateRequest, listTools, listApiProfiles, listModels, getUsageStats, getRecentRequests, clearUsageStats, hubHelpers, HubError, HUB_DEFAULTS, getUsageSnapshot, getUsage, getRateLimits, getUsageHistory, clearUsage, onUsage, refreshQuota, registerQuotaProvider, listQuotaProviders, getKeyInfo } from './lib/hub.js';
 import { ensureHarnessSession, clearHarnessSessions, SESSION_HEADER_DEFAULT } from './lib/harness.js';
 import { clearModelsCache } from './lib/models.js';
 
 const MODULE_NAME = 'ST-RequestHub';
 const EXT_PATH = 'third-party/ST-RequestHub';
-const API_VERSION = 6;
-const VERSION = '1.6.1';
+const API_VERSION = 7;
+const VERSION = '1.8.0';
 
 const DEFAULTS = HUB_DEFAULTS;
 
@@ -77,7 +77,7 @@ function registerGlobal() {
         name: 'ST-RequestHub',
         version: VERSION,
         apiVersion: API_VERSION,
-        capabilities: ['request', 'generate', 'decide', 'agent', 'tools', 'profiles', 'models', 'presets', 'messages', 'worldinfo', 'tokens', 'test', 'stats', 'console', 'harness'],
+        capabilities: ['request', 'generate', 'decide', 'agent', 'tools', 'profiles', 'models', 'presets', 'messages', 'worldinfo', 'tokens', 'test', 'stats', 'console', 'harness', 'trace', 'usage', 'quota', 'usage-history'],
         isReady: () => {
             try {
                 return !getContext().extensionSettings.disabledExtensions.includes('ST-RequestHub');
@@ -94,6 +94,16 @@ function registerGlobal() {
         getUsageStats,
         getRecentRequests,
         clearUsageStats,
+        getUsageSnapshot,
+        getUsage,
+        getRateLimits,
+        getUsageHistory,
+        clearUsage,
+        onUsage,
+        refreshQuota,
+        registerQuotaProvider,
+        listQuotaProviders,
+        getKeyInfo,
         validateRequest,
         listTools,
         listApiProfiles,
