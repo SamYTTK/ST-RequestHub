@@ -36,8 +36,9 @@ extension (or medium) that sends the request.
 - Version tolerance: check `hub.apiVersion` (number, currently `7`) and the
   `hub.capabilities` array instead of hard-coding behavior. Require only the
   capabilities you use (`'request'`, `'decide'`, `'agent'`, `'tools'`,
-  `'profiles'`, `'models'`, `'presets'`, `'stats'`, `'harness'`, …).
-- `hub.version` is the package version (currently `1.9.0`).
+  `'profiles'`, `'models'`, `'models-filter'`, `'usage-detail'`, `'presets'`,
+  `'stats'`, `'harness'`, …).
+- `hub.version` is the package version (currently `1.10.0`).
 
 ## 3. Quick start (lorebook example)
 
@@ -110,6 +111,8 @@ console.log(run.steps);   // auditable trace of every tool round
             apiKey: '…',               // per-request key (stored by the caller, never by the hub)
             model: '…',                // REQUIRED when apiUrl is set; optional override on backend route
             extraHeaders: { … },       // extra outbound headers, sanitized (§5c); explicit keys win
+            allowedModels: ['a','b'],  // model allow-list — only these ids may be used (§5b)
+            modelsEndpoint: '…',       // explicit model-catalog URL (§5b, §9b)
         },
         harness: {                      // harness identity for gated APIs, e.g. OpenCode Go (§5c)
             userAgent: '…',             // '' = hub default ('ST-RequestHub')
@@ -118,6 +121,7 @@ console.log(run.steps);   // auditable trace of every tool round
             sessionHeader: 'x-opencode-session',
             sendSessionHeader: true,
         },
+        sessionId: '…',                 // USAGE SCOPE only (§12) — defaults to harness.sessionId
         apiProfile: 'ProfileName',     // named hub profile (URL+key+model+harness); explicit fields win per field (§5b)
         preset: 'PresetName',          // ST chat-completion preset — IGNORED in decide mode (§4b)
         useOwnConfig: false,           // false = preset samplers win; true = samplers below win
@@ -147,7 +151,9 @@ console.log(run.steps);   // auditable trace of every tool round
     consumer: 'YourExtensionName',      // trace tag: who sent this (ALWAYS SET THIS)
     // Runtime attachments (not JSON, passed alongside — never validated away):
     //   signal   AbortSignal for the whole request/run
-    //   onChunk  ({ text, reasoning }) streaming callback (single mode final text)
+    //   onChunk  ({ text, reasoning }) streaming callback (single mode final text).
+    //            CUMULATIVE: text/reasoning are the FULL answer so far, not a
+    //            delta — replace the buffer, never append to it (§7).
     //   onStep   ({ step, toolCalls, results, text }) per agent round
 }
 ```
@@ -158,7 +164,8 @@ list): `tools`/`limits` with `mode:'single'` or `mode:'decide'`, unknown
 `mode`, empty `input.text` without `messages` (single/agent), missing
 `input.decide` (decide), malformed decide state/questions, decide without
 `apiUrl`, URL-set-but-model-empty, nothing-to-send-with.
-Use `hub.validateRequest(json)` → `{ ok, errors[] }` to pre-check without sending.
+Use `hub.validateRequest(json)` → `{ ok, errors[], code }` to pre-check
+without sending (`code` is the error code the request would have thrown).
 
 ## 4b. Decide mode (Laya-style decision models)
 
@@ -269,6 +276,22 @@ API profiles are named connection presets stored in the hub's own settings:
 request selects one with `settings.apiProfile: 'Name'` — the name is the only
 thing that travels; the hub resolves URL/key/model internally at send time.
 
+**Profile shape (all fields optional except `name`):**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | profile name — the only thing a request references |
+| `apiUrl` | string | base URL; empty = ST backend |
+| `apiKey` | string | secret — never leaves the hub |
+| `model` | string | default model id |
+| `userAgent` / `sessionId` | string | harness identity (§5c) |
+| `extraHeaders` | object | extra outbound headers, sanitized (§5c) |
+| `allowedModels` | string[] | **model allow-list** — when non-empty, ONLY these model ids may be used |
+| `modelsEndpoint` | string | **explicit model-catalog URL** — used verbatim instead of the URL derived from `apiUrl` |
+
+Adding fields needs no migration: the stored object round-trips unknown
+fields verbatim.
+
 **Connection precedence (per field — apiUrl, apiKey, model independently):**
 
 1. Explicit JSON fields (`settings.connection.*`) — always win where non-empty.
@@ -276,17 +299,46 @@ thing that travels; the hub resolves URL/key/model internally at send time.
 3. Hub default profile — fills remaining blanks when the request names none.
 4. Empty — routes to the ST backend with server-stored keys.
 
+`allowedModels` and `modelsEndpoint` follow the SAME chain (explicit →
+named profile → default profile → empty). `allowedModels` is a list, so the
+first **non-empty** list wins; an empty list means "no restriction".
+
 Unknown profile names fail fast (`INVALID_REQUEST`, listing available names).
 `meta.profile` reports which profile supplied the connection (`''` when none);
 `meta` never contains a key. `hub.listApiProfiles()` returns
-`[{ name, apiUrl, model, hasKey, isDefault }]` — metadata only, safe for any
+`[{ name, apiUrl, model, hasKey, userAgent, hasSession, extraHeaderKeys,
+allowedModels, modelsEndpoint, isDefault }]` — metadata only, safe for any
 consumer dropdown UI.
+
+**Model allow-list (`allowedModels`):**
+
+Some servers (ollama / llama.cpp and friends) list every model they *could*
+run, not the ones they actually serve. A profile with an allow-list narrows
+both the catalog and the requests:
+
+- `hub.listModels({ apiProfile })` returns ONLY the allowed model ids
+  (matching is case-insensitive on the id; the original entry — metadata,
+  variants — is kept).
+- A request for a model outside the list is **rejected before any network
+  call** with a distinct error code `MODEL_NOT_ALLOWED`:
+
+  ```
+  HubError.code === 'MODEL_NOT_ALLOWED'
+  HubError.message === 'Model "gpt-4o" is not allowed by profile "laya-local". Allowed models: laya:en, laya:de.'
+  HubError.details  === ['Model "gpt-4o" is not allowed. Allowed: laya:en, laya:de.']
+  ```
+
+  The message names the profile and the allowed ids. `hub.validateRequest()`
+  reports the same code in `result.code`.
+- A model INSIDE the list is accepted (case-insensitively).
 
 **Full precedence table (all axes):**
 
 | Axis | Winner → loser |
 |---|---|
 | Connection + model | explicit JSON → named profile → default profile → ST backend |
+| Model allow-list | explicit JSON list → named profile list → default profile list → (no restriction) |
+| Catalog URL | explicit `modelsEndpoint` → profile `modelsEndpoint` → derived from `apiUrl` |
 | Samplers | explicit JSON keys → chat preset base → (nothing) |
 | Preset on/off | `useOwnConfig: true` drops the preset entirely |
 | Model source | presets never supply the model (rule, both routes) |
@@ -398,8 +450,9 @@ Rules that keep you off the abuse radar:
 
 ## 7. Responses
 
-Single mode → `{ content, reasoning, meta }`.
-Agent mode → `{ content, reasoning, steps, meta }`, where each step is
+Single mode → `{ content, reasoning, usage, rateLimits, finish_reason, meta }`.
+Agent mode → `{ content, reasoning, steps, usage, rateLimits, finish_reason,
+meta }`, where each step is
 `{ step, text, toolCalls: [{id, name, arguments}], results: [{id, name, ok, result}] }`
 and `meta` is `{ route, samplerSource, model, presetName, profile,
 stepsUsed, toolsUsed[], consumer }` (`profile` is `''` when no profile was
@@ -409,17 +462,50 @@ question id to its typed answer (`choice`/`score`/`noul` + `confidence` +
 `probabilities`), `routing` says which checkpoint answered and why, and
 `meta` is `{ route:'decide', model, profile, consumer }`.
 
+- `finish_reason` is the provider's own stop reason (`'stop'`, `'length'`,
+  `'tool_calls'`, …). It is `''` when the provider did not report one. Use it
+  to tell a truncated answer (`'length'`) from a refusal or a normal stop —
+  the hub does not reinterpret it.
+- `usage` is the NORMALIZED usage object (see §12): `{ promptTokens,
+  completionTokens, totalTokens, cachedTokens, cacheWriteTokens,
+  reasoningTokens, cost, currency, serviceTier }` — `null` when the provider
+  reported no usage. Every route (direct, ST backend, decide) uses this one
+  shape.
 - Failures **throw** `hub.HubError` with `.code` (and `.details[]` for
-  `INVALID_REQUEST`, `.partialSteps[]` for `MAX_STEPS`/`TIMEOUT` mid-run).
-  Error codes: `INVALID_REQUEST`, `CONFIG`, `TOOLS_UNSUPPORTED`,
-  `TOOL_CONFLICT`, `MAX_STEPS`, `EMPTY_RESPONSE`, `TIMEOUT`, `ABORTED`,
-  `NETWORK`, `HTTP_4xx/5xx`.
+  `INVALID_REQUEST` / `MODEL_NOT_ALLOWED`, `.partialSteps[]` for
+  `MAX_STEPS`/`TIMEOUT` mid-run).
+  Error codes: `INVALID_REQUEST`, `CONFIG`, `MODEL_NOT_ALLOWED`,
+  `TOOLS_UNSUPPORTED`, `TOOL_CONFLICT`, `MAX_STEPS`, `EMPTY_RESPONSE`,
+  `TIMEOUT`, `ABORTED`, `NETWORK`, `HTTP_4xx/5xx`.
 - The hub **never writes to chat**. Committing results (chat messages,
   lorebook edits, UI updates) is the caller's job — e.g. LayeredAgents commits
   via `saveReply`; a lorebook flow shows the proposed rewrite in its own
   verification UI.
 - Streaming (`stream: true` + `onChunk`) covers the **final answer text only**;
   intermediate agent rounds are non-streamed. `onStep` reports round progress.
+
+### The `onChunk` contract (CUMULATIVE, not incremental)
+
+`onChunk({ text, reasoning })` receives the **full text so far**, not the
+newly-arrived fragment. Every callback carries the complete accumulated
+answer.
+
+```js
+let buffer = '';
+await hub.request({
+    mode: 'single',
+    input: { text: '…' },
+    settings: { stream: true },
+    onChunk: ({ text }) => {
+        buffer = text;   // REPLACE — appending would grow quadratically
+        render(buffer);
+    },
+    consumer: 'MyExtension',
+});
+```
+
+The same holds for the agent round trace event `delta` (§11): it carries the
+cumulative snapshot of that round, not a delta.
 
 ## 8. Capabilities and limitations (read carefully)
 
@@ -430,7 +516,9 @@ decisions on Laya-style decision endpoints (`mode:'decide'`, §4b); per-request 
 config; preset-driven or own-config sampling; registry + inline tools with
 per-run scoping; retry/timeout/stream-fallback ownership; token helpers
 (`countTokens`, `fitBudget`), prompt assembly (`buildMessages`),
-world-info fetch, connection test.
+world-info fetch, connection test; per-profile model allow-lists and
+explicit catalog URLs (§5b, §9b); session-scoped usage with cache-write
+tokens (§12).
 
 **Cannot / will not do:**
 - No policy of any kind: approvals, write gates, dry-runs, budgets-as-rules.
@@ -455,7 +543,8 @@ The extension drawer is a slim launcher (`OPEN CONSOLE` button); the real UI
 is the **Hub Console**, an in-page popup (`POPUP_TYPE.DISPLAY`, wide+large)
 with three tabs: **01 OVERVIEW** (status, traffic, latency sparkline,
 by-mode/consumer/profile breakdowns, live recent-requests table),
-**02 PROFILES** (create/save/test/delete, default profile), **03 SETTINGS**
+**02 PROFILES** (create/save/test/delete, default profile, per-profile model
+allow-list + catalog URL), **03 SETTINGS**
 (defaults + agent caps + preset check). Open it programmatically with
 `hub.openConsole()` (requires the `'console'` capability).
 
@@ -481,7 +570,7 @@ for Laya-style ones (auto-selected per profile).
 
 ```js
 const { models, cached, url, profile } = await hub.listModels({
-    apiProfile: 'opencode-go',   // or connection: { apiUrl, apiKey }
+    apiProfile: 'opencode-go',   // or connection: { apiUrl, apiKey, allowedModels?, modelsEndpoint? }
     refresh: false,              // true to bypass the ~15min cache
 });
 console.log(models.map((m) => m.id)); // e.g. ['kimi-k2.6', 'glm-5.3', …]
@@ -491,14 +580,29 @@ console.log(models.map((m) => m.id)); // e.g. ['kimi-k2.6', 'glm-5.3', …]
   → `…/v1/models`; bare hosts → `…/v1/models`) and GETs it **with the
   resolved key**, so keyed servers list only what the key may use. The key
   never appears in the result. Proxy-first, direct fallback (same as chat).
+- **Cache identity:** results cache per endpoint **+ the key's identity**
+  (a short fingerprint — never the key itself), so two profiles on one
+  endpoint with different keys never share one catalog.
+- **Allow-list:** when the profile has `allowedModels`, the returned catalog
+  contains only those ids (case-insensitive match, original entries kept).
+  The cache always holds the FULL upstream catalog — the filter is applied
+  per read, so a narrow read never poisons a wide one. A request for a model
+  outside the list is rejected with `MODEL_NOT_ALLOWED` (§5b).
+- **Explicit endpoint:** when the profile has `modelsEndpoint`, that URL is
+  used **verbatim** as the catalog URL (only an `http(s)://` prefix is added
+  when missing) instead of the URL derived from `apiUrl`. Use it for servers
+  whose catalog does not live at `/v1/models`.
 - Results cache per endpoint (~15 min); `hub.clearModelsCache(prefix?)`
   drops entries. Decision endpoints throw `CATALOG_UNSUPPORTED` (they serve
   no catalog); empty-URL requests throw `CONFIG` (the ST-backend route has
   nothing listable — use the preset list instead).
 - The Hub Console shows a **MODELS** button per profile: searchable popup,
-  click fills the profile's model field. TEST also warns when the saved
-  model id is absent from the current catalog (renamed/retired models).
-- Capability: `'models'`.
+  click fills the profile's model field. The picker honors the profile's
+  allow-list and catalog URL. TEST also warns when the saved model id is
+  absent from the current catalog (renamed/retired models).
+- The console PROFILES tab edits the allow-list (comma-separated) and the
+  catalog URL per profile.
+- Capabilities: `'models'`, `'models-meta'` (§9c), `'models-filter'`.
 
 ## 9c. Model metadata + thinking variants
 
@@ -581,9 +685,12 @@ hub.request({
         // phase: 'request' | 'response' | 'delta' | 'error'
         // request:  { route, model, profile, presetName, samplers, maxTokens,
         //             toolChoice, tools: [names], messages: [...] }
-        // response: { content, reasoning, toolCalls, usage, rateLimits,
-        //             durationMs, status }
-        // delta:    { text, reasoning }   (direct route, opted-in streaming)
+        // response: { content, reasoning, finish_reason, toolCalls, usage,
+        //             rateLimits, durationMs, status }
+        // delta:    { round, snapshot: { text, reasoning }, text, reasoning }
+        //           CUMULATIVE snapshot of the round so far (NOT a delta).
+        //           `snapshot` is the current field; `text`/`reasoning` are
+        //           kept as backwards-compatible aliases of it.
         // error:    { errorCode, message, rateLimits, durationMs }
     },
     consumer: 'MyExtension',
@@ -605,7 +712,8 @@ answers or raw keys). Keys are reduced to a fingerprint; short keys are masked
 completely.
 
 ```js
-hub.getUsageSnapshot({ profile?, model?, consumer? }); // cached, sync
+hub.getUsageSnapshot({ profile?, model?, consumer?, providerHost?,
+                       keyFingerprint?, sessionId? }); // cached, sync
 hub.getUsage(filter);                                  // aggregates
 hub.getRateLimits(filter);                             // normalized windows
 hub.getUsageHistory({ scope, window: 'minute'|'hour'|'day', limit });
@@ -622,6 +730,55 @@ hub.clearUsage();
 hub.flushUsageWrites?.();                              // flush debounced persistence
 ```
 
+### The normalized usage object
+
+Every route reports the same shape (this is what `res.usage` contains):
+
+```js
+{
+  promptTokens: 1200,        // prompt / input tokens
+  completionTokens: 340,     // completion / output tokens
+  totalTokens: 1540,         // provider total, else prompt + completion
+  cachedTokens: 800,         // cache READ tokens (prompt cache hits)
+  cacheWriteTokens: 120,     // cache CREATION tokens (cache writes)
+  reasoningTokens: 0,        // reasoning / thinking tokens
+  cost: 0.0123,              // provider-reported, or a configured price table
+  currency: 'USD',
+  serviceTier: '',           // provider tier when reported
+}
+```
+
+`cacheWriteTokens` is read from
+`usage.prompt_tokens_details.cache_write_tokens`,
+`usage.input_tokens_details.cache_write_tokens` or
+`usage.cache_creation_input_tokens` (Anthropic), and defaults to `0`. It is
+aggregated in the lifetime totals, in agent-run totals and in the persisted
+counters.
+
+### Per-session usage scope
+
+Every usage event carries the session id of the run:
+
+- `settings.sessionId` scopes the usage (defaults to `settings.harness.sessionId`
+  — the stable per-conversation harness id).
+- `hub.getUsageSnapshot({ sessionId })` returns only that session's events.
+- The id appears on the event (`event.sessionId`) and in the `onUsage` live
+  subscription.
+
+### Filtered snapshots
+
+`getUsageSnapshot(filter)` / `getUsage(filter)`:
+
+- **Without a filter** the snapshot reports the LIFETIME aggregates
+  (`totals`, `days`).
+- **With a filter** `totals` and `days` are recomputed from the events that
+  match it — a filtered view never shows all-time numbers. (The filtered
+  aggregates are derived from the in-memory event ring, the last 500 events;
+  the unfiltered lifetime counters are persisted.)
+- Quota windows (`limits`) are matched on the KEY scope only
+  (`profile`/`model`/`providerHost`/`keyFingerprint`): a `consumer` or
+  `sessionId` filter keeps them instead of dropping every window.
+
 Window shape: `{ kind, limit, remaining, used, resetAt, windowSeconds, source,
 confidence, family, valueLabel, usedPercent, remainingPercent, resetInMs }`.
 Kinds include `requests`, `tokens`, `input-tokens`, `output-tokens`,
@@ -632,12 +789,13 @@ Captured automatically:
 - Anthropic `anthropic-ratelimit-*` (ISO resets).
 - OpenRouter `X-RateLimit-*` and `retry-after` (seconds, HTTP-date or ISO).
 - Token usage from Chat Completions / Responses / Anthropic bodies, including
-  cached and reasoning tokens; provider-reported cost, or a configured price
-  table (marked estimated).
+  cached, cache-write and reasoning tokens; provider-reported cost, or a
+  configured price table (marked estimated). Decide-mode and ST-backend
+  requests are normalized through the same parser.
 - Built-in quota probes: OpenRouter (`/api/v1/key`), DeepSeek (`/user/balance`),
   OpenCode Go (`/zen/go/v1/usage`).
 
 Persisted: aggregate counters, daily buckets (31 days), and last-known,
 model-scoped limit windows. Expired windows are dropped on read. The recent
-event ring is session-only. Capabilities: `'trace'`, `'usage'`, `'quota'`,
-`'usage-history'`.
+event ring is session-only. Capabilities: `'trace'`, `'usage'`,
+`'usage-detail'`, `'quota'`, `'usage-history'`.

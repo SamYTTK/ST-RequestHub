@@ -50,5 +50,11 @@ None.
   Each profile also has a MODELS button that lists what the endpoint
   serves for its key, so you can pick a model instead of typing its id.
   Details in `HUB_Documentation.md` §5c (harness) and §9b (catalog).
+- If a server lists models it *could* run instead of the ones it serves
+  (ollama / llama.cpp do), give the profile an **allow-list** (comma-separated
+  model ids) and the hub offers only those — and refuses any other model with
+  a clear error. The same profile row also takes an explicit **catalog URL**
+  when the model list does not live at `/v1/models`.
+- Details in `HUB_Documentation.md` §5b (profiles).
 - If you build extensions (or are an AI agent wiring one up), the technical
   manual is `HUB_Documentation.md` in this repo.
