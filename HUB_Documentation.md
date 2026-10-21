@@ -37,7 +37,7 @@ extension (or medium) that sends the request.
   `hub.capabilities` array instead of hard-coding behavior. Require only the
   capabilities you use (`'request'`, `'decide'`, `'agent'`, `'tools'`,
   `'profiles'`, `'models'`, `'presets'`, `'stats'`, `'harness'`, …).
-- `hub.version` is the package version (currently `1.8.0`).
+- `hub.version` is the package version (currently `1.9.0`).
 
 ## 3. Quick start (lorebook example)
 
@@ -499,6 +499,46 @@ console.log(models.map((m) => m.id)); // e.g. ['kimi-k2.6', 'glm-5.3', …]
   click fills the profile's model field. TEST also warns when the saved
   model id is absent from the current catalog (renamed/retired models).
 - Capability: `'models'`.
+
+## 9c. Model metadata + thinking variants
+
+Catalog entries are normalized, not stripped: every entry keeps its `id`
+(unchanged from the upstream catalog) and carries the upstream metadata plus
+a `variants[]` list — the thinking/reasoning levels a UI can offer per model
+(the way OpenCode exposes `ModelInfo.variants[]`).
+
+```js
+{
+  id: 'kimi-k2.6',          // always present, exactly as the catalog reported it
+  name: 'Kimi K2.6',
+  owned_by: 'moonshot',
+  context_window: 262144,   // upstream context_window, or context_length when only that exists
+  description: 'Long-context MoE model',
+  created: 1735689600,
+  capabilities: { tools: true, vision: false },
+  metadata: { family: 'kimi' },
+  pricing: { input: 0.6, output: 2.5 },
+  variants: [{ id: 'low' }, { id: 'medium' }, { id: 'high' }],
+}
+```
+
+- Only the fields the endpoint actually sent are present — the hub never
+  invents values. `id` and `variants` are always present (`variants` is `[]`
+  when the model exposes no thinking levels).
+- `variants` normalization — first match wins:
+
+| # | Source | Shape accepted |
+|---|--------|----------------|
+| a | `variants` | array of strings, array of `{ id }`, or object keyed by id |
+| b | `metadata.supported_reasoning_efforts` (or top-level `supported_reasoning_efforts`) | array of strings, or object keyed by id |
+| c | `metadata.thinking_variants`, `capabilities.variants`, `capabilities.reasoning_efforts` | array of strings, array of `{ id }`, or object keyed by id |
+| d | — | `variants: []` (no thinking levels) |
+
+- Order is preserved and ids are trimmed. The hub does not guess which
+  levels a provider supports — it reports what the catalog said.
+- Backward compatible: every entry still has `.id`, so id-only consumers
+  (`models.map((m) => m.id)`) keep working untouched.
+- Capability: `'models-meta'` (in addition to `'models'`).
 
 ## 10. Instructions for future agents integrating with the hub
 

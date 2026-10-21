@@ -5,7 +5,7 @@ import { clearModelsCache } from './lib/models.js';
 const MODULE_NAME = 'ST-RequestHub';
 const EXT_PATH = 'third-party/ST-RequestHub';
 const API_VERSION = 7;
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 
 const DEFAULTS = HUB_DEFAULTS;
 
@@ -77,7 +77,7 @@ function registerGlobal() {
         name: 'ST-RequestHub',
         version: VERSION,
         apiVersion: API_VERSION,
-        capabilities: ['request', 'generate', 'decide', 'agent', 'tools', 'profiles', 'models', 'presets', 'messages', 'worldinfo', 'tokens', 'test', 'stats', 'console', 'harness', 'trace', 'usage', 'quota', 'usage-history'],
+        capabilities: ['request', 'generate', 'decide', 'agent', 'tools', 'profiles', 'models', 'models-meta', 'presets', 'messages', 'worldinfo', 'tokens', 'test', 'stats', 'console', 'harness', 'trace', 'usage', 'quota', 'usage-history'],
         isReady: () => {
             try {
                 return !getContext().extensionSettings.disabledExtensions.includes('ST-RequestHub');
