@@ -129,6 +129,20 @@ function isDecideProfile(p) {
     return model.startsWith('laya') || url.includes('systemone') || url.includes('11435');
 }
 
+/** Allow-list as one editable line (comma or newline separated). */
+function allowedModelsText(p) {
+    const list = Array.isArray(p?.allowedModels) ? p.allowedModels : [];
+    return list.map((x) => String(x ?? '').trim()).filter(Boolean).join(', ');
+}
+
+/** Parse an allow-list line into a clean string[]. */
+function splitModelList(value) {
+    return String(value ?? '')
+        .split(/[\n,]/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+}
+
 function fmtAge(ts) {
     const s = Math.max(0, Math.round((Date.now() - Number(ts)) / 1000));
     if (s < 60) return `${s}s ago`;
@@ -207,6 +221,8 @@ async function openModelPicker(p, onPick) {
         list.innerHTML = '';
         try {
             const out = await h.listModels({
+                // Named profile → its allow-list / explicit catalog URL apply.
+                apiProfile: p.name ?? '',
                 connection: { apiUrl: p.apiUrl ?? '', apiKey: p.apiKey ?? '' },
                 refresh: !!refresh,
             });
@@ -258,10 +274,18 @@ function renderProfiles(root) {
                 <input data-k="sessionId" placeholder="Harness session id (empty = auto per chat)" value="${esc(p.sessionId ?? '')}" autocomplete="off" title="Stable per-conversation id sent as x-opencode-session (or the profile's custom header). Empty = auto-generated per chat.">
                 <input data-k="userAgent" placeholder="Harness user agent (empty = hub default)" value="${esc(p.userAgent ?? '')}" autocomplete="off" title="Distinctive client identity for harness-gated APIs. Browsers cannot override User-Agent directly — the value is attempted plus sent as x-harness-user-agent; the session header above is the operative signal.">
                 <button class="strh-btn strh-btn--sm strh-pf-newsession" title="Generate a fresh stored session id">↻ NEW ID</button>
+            </div>
+            <div class="strh-pf-sub strh-pf-sub--catalog">
+                <input data-k="allowedModels" placeholder="Allowed models (comma separated, empty = all)" value="${esc(allowedModelsText(p))}" autocomplete="off" title="Model allow-list for this profile. When set, the model picker offers only these ids and a request for any other model is rejected with MODEL_NOT_ALLOWED.">
+                <input data-k="modelsEndpoint" placeholder="Models catalog URL (empty = derived from base URL)" value="${esc(p.modelsEndpoint ?? '')}" autocomplete="off" title="Explicit model-catalog URL for this profile (e.g. http://127.0.0.1:11434/v1/models). Used verbatim instead of the URL derived from the base URL.">
             </div>`;
         row.querySelectorAll('input').forEach((inp) => {
             inp.addEventListener('change', () => {
-                p[inp.dataset.k] = inp.value;
+                if (inp.dataset.k === 'allowedModels') {
+                    p.allowedModels = splitModelList(inp.value);
+                } else {
+                    p[inp.dataset.k] = inp.value;
+                }
                 ctx().saveSettingsDebounced();
                 renderProfiles(root);
                 renderOverview(root);
@@ -309,7 +333,7 @@ function renderProfiles(root) {
                 let extra = '';
                 if (res.success && !isDecideProfile(p) && typeof h.listModels === 'function') {
                     try {
-                        const cat = await h.listModels({ connection: conn });
+                        const cat = await h.listModels({ apiProfile: p.name ?? '', connection: conn });
                         const ids = new Set((cat.models ?? []).map((m) => m.id));
                         if (ids.size && p.model && !ids.has(String(p.model).trim())) {
                             extra = ' <span class="strh-dim">· model not in current catalog (may be renamed/retired)</span>';
@@ -345,8 +369,10 @@ function bindProfiles(root) {
             model: root.querySelector('#strh-pf-model')?.value?.trim() ?? '',
             sessionId: root.querySelector('#strh-pf-session')?.value?.trim() ?? '',
             userAgent: root.querySelector('#strh-pf-ua')?.value?.trim() ?? '',
+            allowedModels: splitModelList(root.querySelector('#strh-pf-allowed')?.value ?? ''),
+            modelsEndpoint: root.querySelector('#strh-pf-catalog')?.value?.trim() ?? '',
         });
-        for (const id of ['#strh-pf-name', '#strh-pf-url', '#strh-pf-key', '#strh-pf-model', '#strh-pf-session', '#strh-pf-ua']) {
+        for (const id of ['#strh-pf-name', '#strh-pf-url', '#strh-pf-key', '#strh-pf-model', '#strh-pf-session', '#strh-pf-ua', '#strh-pf-allowed', '#strh-pf-catalog']) {
             const el = root.querySelector(id);
             if (el) el.value = '';
         }
