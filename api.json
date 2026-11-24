@@ -1,0 +1,44 @@
+{
+  "id": "ST-RequestHub",
+  "kind": "hub",
+  "purpose": "Any model call: single-turn, agent/tool loops, decide, profiles, models, presets, usage and quota.",
+  "global": "globalThis.STRequestHub",
+  "apiVersion": 7,
+  "capabilities": ["request", "generate", "decide", "agent", "tools", "profiles", "models", "models-meta", "models-filter", "presets", "messages", "worldinfo", "tokens", "test", "stats", "console", "harness", "trace", "usage", "usage-detail", "quota", "usage-history"],
+  "probe": "!!globalThis.STRequestHub && typeof globalThis.STRequestHub.request === 'function' && (typeof globalThis.STRequestHub.isReady !== 'function' || globalThis.STRequestHub.isReady()) && (globalThis.STRequestHub.apiVersion ?? 0) >= 7 && Array.isArray(globalThis.STRequestHub.capabilities) && globalThis.STRequestHub.capabilities.includes('request')",
+  "absentNotice": "RequestHub is not available; this feature is disabled.",
+  "methods": [
+    {
+      "name": "request",
+      "signature": "request(payload) => Promise<{ content, steps?, usage? }>",
+      "inputs": "payload: { mode: 'single'|'agent'|'decide', input: { text }, settings?: { connection, samplers, maxTokens }, tools?, limits?, consumer?, signal?, onStep?, onChunk? }",
+      "outputs": "{ content: string, steps?: array, usage?: object }",
+      "errorCodes": ["CONFIG", "INVALID_REQUEST", "EMPTY_RESPONSE", "HTTP_4xx", "HTTP_5xx", "NETWORK", "TIMEOUT", "ABORTED", "MAX_STEPS", "TOOLS_UNSUPPORTED", "TOOL_CONFLICT", "CATALOG_UNSUPPORTED"]
+    },
+    {
+      "name": "runAgent",
+      "signature": "runAgent(payload) => Promise<{ content, steps }>",
+      "inputs": "payload with tools, limits.maxSteps and totalTimeoutMs",
+      "outputs": "{ content, steps: auditable tool rounds }",
+      "errorCodes": ["CONFIG", "INVALID_REQUEST", "MAX_STEPS", "TIMEOUT", "TOOLS_UNSUPPORTED", "TOOL_CONFLICT", "ABORTED"]
+    },
+    {
+      "name": "decide",
+      "signature": "decide(payload) => Promise<object>",
+      "inputs": "decision endpoint payload from HUB_Documentation.md section 4b",
+      "outputs": "parsed decision object",
+      "errorCodes": ["CONFIG", "INVALID_REQUEST", "EMPTY_RESPONSE", "HTTP_4xx", "NETWORK", "TIMEOUT", "ABORTED"]
+    },
+    {
+      "name": "listModels",
+      "signature": "listModels() => Promise<string[]>",
+      "inputs": "none",
+      "outputs": "available model ids",
+      "errorCodes": ["CONFIG", "CATALOG_UNSUPPORTED", "NETWORK", "EMPTY_RESPONSE"]
+    }
+  ],
+  "events": [{ "name": "hub:ready", "payload": "{ version, apiVersion }" }],
+  "example": "const res = await globalThis.STRequestHub.request({ mode: 'single', input: { text: 'Summarize these lore entries: ...' }, consumer: 'MyExtension' }); console.log(res.content);",
+  "docs": "HUB_Documentation.md#3-quick-start-lorebook-example",
+  "tests": ["node", "--test", "test"]
+}
